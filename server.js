@@ -5,19 +5,91 @@ const cheerio = require('cheerio');
 const cache = require('memory-cache');
 
 const app = express();
-const PORT = process.env.PORT || 8080;
-
-// Enable CORS for all routes
 app.use(cors());
-app.use(express.json());
 
-// Cache duration in milliseconds (30 minutes)
-const CACHE_DURATION = 30 * 60 * 1000;
-
-// Base URL for freek.to
+const PORT = process.env.PORT || 3000;
+const CACHE_DURATION = 60 * 60 * 1000; // 1 hour in milliseconds
 const BASE_URL = 'https://freek.to';
 
-// Main welcome endpoint
+// Additional user agents to rotate through
+const USER_AGENTS = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:123.0) Gecko/20100101 Firefox/123.0',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+  'Mozilla/5.0 (iPad; CPU OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1'
+];
+
+// Function to get a random user agent
+function getRandomUserAgent() {
+  const randomIndex = Math.floor(Math.random() * USER_AGENTS.length);
+  return USER_AGENTS[randomIndex];
+}
+
+// Function to create browser-like headers with a random user agent
+function getBrowserHeaders(referer = 'https://www.google.com/') {
+  return {
+    'User-Agent': getRandomUserAgent(),
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Referer': referer,
+    'sec-ch-ua': '"Google Chrome";v="123", "Not:A-Brand";v="8", "Chromium";v="123"',
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"macOS"',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'cross-site',
+    'Sec-Fetch-User': '?1',
+    'Upgrade-Insecure-Requests': '1',
+    'Connection': 'keep-alive',
+    'Cache-Control': 'max-age=0',
+    'dnt': '1',
+    'Pragma': 'no-cache'
+  };
+}
+
+// Function to handle scraping with retries and delay
+async function fetchWithRetry(url, options = {}, maxRetries = 3, initialDelay = 1000) {
+  let lastError;
+  let delay = initialDelay;
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      // Add a random delay between attempts
+      if (attempt > 0) {
+        const jitter = Math.random() * 500;
+        await new Promise(resolve => setTimeout(resolve, delay + jitter));
+        delay *= 1.5; // Exponential backoff
+      }
+      
+      // If not first attempt, get a new random user agent
+      if (attempt > 0 && options.headers) {
+        options.headers['User-Agent'] = getRandomUserAgent();
+      }
+      
+      console.log(`Attempt ${attempt + 1}/${maxRetries} for URL: ${url}`);
+      const response = await axios(url, options);
+      return response.data;
+    } catch (error) {
+      console.error(`Attempt ${attempt + 1} failed:`, error.message);
+      lastError = error;
+      
+      // If we get a 403 or 429, it's likely we're being rate limited or blocked
+      if (error.response && (error.response.status === 403 || error.response.status === 429)) {
+        console.log('Rate limited or blocked. Increasing delay...');
+        delay *= 2; // Further increase delay on rate limiting
+      }
+    }
+  }
+  
+  // All retries failed
+  throw new Error(`Max retries (${maxRetries}) exceeded. Last error: ${lastError.message}`);
+}
+
+// Welcome endpoint
 app.get('/', (req, res) => {
   res.json({
     message: 'Welcome to FreekTo TV API',
@@ -38,25 +110,7 @@ app.get('/trending', async (req, res) => {
     console.log('Fetching trending movies from', BASE_URL);
     
     // Enhanced headers to better mimic a real browser
-    const headers = {
-      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Accept-Encoding': 'gzip, deflate, br',
-      'Referer': 'https://www.google.com/',
-      'sec-ch-ua': '"Google Chrome";v="123", "Not:A-Brand";v="8", "Chromium";v="123"',
-      'sec-ch-ua-mobile': '?0',
-      'sec-ch-ua-platform': '"macOS"',
-      'Sec-Fetch-Dest': 'document',
-      'Sec-Fetch-Mode': 'navigate',
-      'Sec-Fetch-Site': 'cross-site',
-      'Sec-Fetch-User': '?1',
-      'Upgrade-Insecure-Requests': '1',
-      'Connection': 'keep-alive',
-      'Cache-Control': 'max-age=0',
-      'dnt': '1',
-      'Pragma': 'no-cache'
-    };
+    const headers = getBrowserHeaders();
     
     // Try multiple approaches to get the content
     let html;
@@ -65,11 +119,11 @@ app.get('/trending', async (req, res) => {
     // Approach 1: Direct access with enhanced headers
     try {
       console.log('Trying direct access with enhanced headers...');
-      response = await axios.get(BASE_URL, {
+      response = await fetchWithRetry(BASE_URL, {
         headers: headers,
         timeout: 15000
       });
-      html = response.data;
+      html = response;
       console.log(`Successfully fetched homepage HTML, length: ${html.length}`);
     } catch (directError) {
       console.log('Direct access failed:', directError.message);
@@ -77,11 +131,11 @@ app.get('/trending', async (req, res) => {
       // Approach 2: Try alternative URL
       try {
         console.log('Trying alternative URL (movies page)...');
-        response = await axios.get(`${BASE_URL}/movies`, {
+        response = await fetchWithRetry(`${BASE_URL}/movies`, {
           headers: headers,
           timeout: 15000
         });
-        html = response.data;
+        html = response;
         console.log(`Successfully fetched movies page HTML, length: ${html.length}`);
       } catch (altError) {
         console.log('Alternative URL failed:', altError.message);
@@ -90,16 +144,16 @@ app.get('/trending', async (req, res) => {
         try {
           console.log('Trying with delay and different user agent...');
           // Modify headers slightly
-          headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36';
+          headers['User-Agent'] = getRandomUserAgent();
           
           // Add a delay before request
           await new Promise(resolve => setTimeout(resolve, 1500));
           
-          response = await axios.get(BASE_URL, {
+          response = await fetchWithRetry(BASE_URL, {
             headers: headers,
             timeout: 20000
           });
-          html = response.data;
+          html = response;
           console.log(`Successfully fetched homepage with delay, HTML length: ${html.length}`);
         } catch (delayError) {
           console.log('Delayed approach failed:', delayError.message);
@@ -430,28 +484,14 @@ app.get('/video/:id', async (req, res) => {
     console.log(`Constructed movie URL: ${movieUrl}`);
     
     // Define headers to make the request look like it's coming from a browser
-    const headers = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Accept-Encoding': 'gzip, deflate, br',
-      'Connection': 'keep-alive',
-      'Upgrade-Insecure-Requests': '1',
-      'Sec-Fetch-Dest': 'document',
-      'Sec-Fetch-Mode': 'navigate',
-      'Sec-Fetch-Site': 'none',
-      'Sec-Fetch-User': '?1',
-      'Cache-Control': 'max-age=0',
-      'Referer': BASE_URL
-    };
+    const headers = getBrowserHeaders();
     
     // Fetch the HTML of the movie page
-    const response = await axios.get(movieUrl, {
+    const html = await fetchWithRetry(movieUrl, {
       headers: headers,
       timeout: 20000 // 20 second timeout
     });
     
-    const html = response.data;
     console.log(`Successfully fetched movie page HTML, length: ${html.length}`);
     
     // Log first 500 characters of HTML to see what we're dealing with
@@ -693,23 +733,14 @@ app.get('/search', async (req, res) => {
     const searchUrl = `${BASE_URL}/search?q=${encodeURIComponent(query)}`;
 
     // Define headers to make the request look like it's coming from a browser
-    const headers = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-      'Accept-Language': 'en-US,en;q=0.5',
-      'Connection': 'keep-alive',
-      'Upgrade-Insecure-Requests': '1',
-      'Cache-Control': 'max-age=0',
-      'Referer': BASE_URL
-    };
-
+    const headers = getBrowserHeaders();
+    
     // Fetch search results
-    const response = await axios.get(searchUrl, {
+    const html = await fetchWithRetry(searchUrl, {
       headers: headers,
       timeout: 10000 // 10 second timeout
     });
 
-    const html = response.data;
     console.log(`Successfully fetched search results HTML, length: ${html.length}`);
 
     const $ = cheerio.load(html);
