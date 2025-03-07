@@ -21,7 +21,7 @@ const BASE_URL = 'https://freek.to';
 app.get('/', (req, res) => {
   res.json({
     message: 'Welcome to FreekTo TV API',
-    endpoints: ["/trending", "/search?q=query"]
+    endpoints: ["/trending", "/search?q=query", "/video/:id"]
   });
 });
 
@@ -460,7 +460,7 @@ app.get('/video/:id', async (req, res) => {
       }
     }
     
-    // If still no video URL, look for JavaScript variables that might contain the URL
+    // If still no video URL found, look for JavaScript variables that might contain the URL
     if (!videoUrl) {
       console.log('No iframe player found, checking for JavaScript variables');
       
