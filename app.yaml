@@ -1,0 +1,21 @@
+runtime: nodejs18
+
+service: freekto-tv-api
+
+instance_class: F1
+
+automatic_scaling:
+  min_instances: 0
+  max_instances: 1
+  min_idle_instances: 0
+  max_idle_instances: 1
+  min_pending_latency: 3000ms
+  max_pending_latency: 6000ms
+
+handlers:
+  - url: /.*
+    script: auto
+    secure: always
+
+env_variables:
+  NODE_ENV: "production"
