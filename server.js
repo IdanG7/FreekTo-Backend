@@ -101,10 +101,10 @@ app.get('/', (req, res) => {
   });
 });
 
-// Trending movies endpoint with improved anti-bot bypass techniques
+// Trending movies endpoint
 app.get('/trending', async (req, res) => {
   try {
-    // Check if we have cached data
+    // Check cache first
     const cachedData = cache.get('trending');
     if (cachedData) {
       console.log('Returning cached trending data');
@@ -116,349 +116,346 @@ app.get('/trending', async (req, res) => {
     // Enhanced headers to better mimic a real browser
     const headers = getBrowserHeaders();
     
-    // Try multiple approaches to get the content
+    // Multiple scraping approaches to bypass protection
     let html;
     let response;
+    let scrapedMovies = [];
     
-    // Approach 1: Direct access with enhanced headers
+    // First attempt: Direct scraping with enhanced setup
     try {
-      console.log('Trying direct access with enhanced headers...');
+      console.log('Attempting advanced direct scraping approach...');
+      
+      // Use a randomized delay to appear more human-like
+      const randomDelay = Math.floor(Math.random() * 1000) + 500;
+      await new Promise(resolve => setTimeout(resolve, randomDelay));
+      
+      // Use a more complete browser fingerprint
+      const cookieJar = {};
+      const enhancedHeaders = {
+        ...headers,
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+        'sec-ch-ua-platform': '"Windows"',
+        'sec-ch-ua': '"Google Chrome";v="113", "Chromium";v="113", "Not-A.Brand";v="24"'
+      };
+      
+      // Try to get the main page with a timeout
       response = await fetchWithRetry(BASE_URL, {
-        headers: headers,
-        timeout: 15000
-      });
+        headers: enhancedHeaders,
+        timeout: 30000,
+        withCredentials: true
+      }, 5, 2000);
+      
       html = response;
-      console.log(`Successfully fetched homepage HTML, length: ${html.length}`);
-    } catch (directError) {
-      console.log('Direct access failed:', directError.message);
+      console.log(`Successfully fetched HTML, length: ${html.length}`);
       
-      // Approach 2: Try alternative URL
-      try {
-        console.log('Trying alternative URL (movies page)...');
-        response = await fetchWithRetry(`${BASE_URL}/movies`, {
-          headers: headers,
-          timeout: 15000
-        });
-        html = response;
-        console.log(`Successfully fetched movies page HTML, length: ${html.length}`);
-      } catch (altError) {
-        console.log('Alternative URL failed:', altError.message);
+      // Parse with cheerio
+      const $ = cheerio.load(html);
+      
+      // Multiple selectors to try different approaches
+      const selectors = [
+        '.movies-list .movie-item', // Common structure
+        '.trending-movies .movie',   // Alternative structure
+        '.movie-card',               // Another possibility
+        '.content .movie',           // Generic approach
+        'div[data-movie-id]',        // Data attribute approach
+        '.movie-grid > div'          // Grid-based layout
+      ];
+      
+      // Try each selector strategy
+      for (const selector of selectors) {
+        console.log(`Trying selector: ${selector}`);
+        const elements = $(selector);
         
-        // Approach 3: Try with additional delay and retry
-        try {
-          console.log('Trying with delay and different user agent...');
-          // Modify headers slightly
-          headers['User-Agent'] = getRandomUserAgent();
+        if (elements.length > 0) {
+          console.log(`Found ${elements.length} elements with selector ${selector}`);
           
-          // Add a delay before request
-          await new Promise(resolve => setTimeout(resolve, 1500));
-          
-          response = await fetchWithRetry(BASE_URL, {
-            headers: headers,
-            timeout: 20000
+          elements.each((i, el) => {
+            // Only take first 10 movies
+            if (i >= 10) return false;
+            
+            const element = $(el);
+            
+            // Try multiple approaches to extract data
+            const title = element.find('h3').text().trim() || 
+                          element.find('.title').text().trim() || 
+                          element.find('strong').text().trim() || 
+                          element.attr('title') || 
+                          element.find('img').attr('alt') || 
+                          'Unknown';
+                          
+            // Try to find link - could be on the element itself or a child
+            let link = element.attr('href') || 
+                       element.find('a').attr('href') || 
+                       element.parent('a').attr('href');
+                       
+            // Make sure link is absolute
+            if (link && !link.startsWith('http')) {
+              link = `${BASE_URL}${link.startsWith('/') ? '' : '/'}${link}`;
+            } else if (!link) {
+              link = `${BASE_URL}/movie/unknown-${i}`;
+            }
+            
+            // Try to find image - check for both src and data-src (lazy loading)
+            let image = element.find('img').attr('data-src') || 
+                        element.find('img').attr('src') || 
+                        element.find('.poster').attr('style')?.match(/url\(['"]?(.*?)['"]?\)/)?.[1];
+                        
+            // Make sure image is absolute
+            if (image && !image.startsWith('http')) {
+              image = `${BASE_URL}${image.startsWith('/') ? '' : '/'}${image}`;
+            } else if (!image) {
+              image = 'https://via.placeholder.com/300x450/141414/e50914?text=FreekTo';
+            }
+            
+            // Add the movie to our results if it's not a duplicate
+            if (title !== 'Unknown' && !scrapedMovies.some(m => m.title === title)) {
+              scrapedMovies.push({ title, link, image });
+            }
           });
-          html = response;
-          console.log(`Successfully fetched homepage with delay, HTML length: ${html.length}`);
-        } catch (delayError) {
-          console.log('Delayed approach failed:', delayError.message);
-          throw new Error('All direct access approaches failed');
-        }
-      }
-    }
-    
-    // Log first 500 characters to debug
-    console.log('HTML preview:', html.substring(0, 500));
-    
-    const $ = cheerio.load(html);
-    console.log('Analyzing page structure...');
-    
-    // Extract any script URLs that might load the actual content
-    const scriptUrls = [];
-    $('script[src]').each((i, el) => {
-      const src = $(el).attr('src');
-      if (src) {
-        scriptUrls.push(src.startsWith('http') ? src : (src.startsWith('/') ? BASE_URL + src : BASE_URL + '/' + src));
-      }
-    });
-    
-    console.log(`Found ${scriptUrls.length} script URLs`);
-    
-    // Check for any data in JSON format embedded in the page
-    let jsonData = null;
-    $('script:not([src])').each((i, el) => {
-      const scriptContent = $(el).html() || '';
-      // Look for patterns like window.__INITIAL_DATA__ = {...} or JSON data
-      const jsonMatches = scriptContent.match(/window\.__[A-Z_]+__\s*=\s*({.+?});/s) || 
-                          scriptContent.match(/const\s+initialData\s*=\s*({.+?});/s) ||
-                          scriptContent.match(/var\s+initialData\s*=\s*({.+?});/s) ||
-                          scriptContent.match(/JSON\.parse\(['"](.+?)['"]\)/s);
-      
-      if (jsonMatches && jsonMatches.length > 1) {
-        try {
-          // If it's JSON.parse, we need to handle the string differently
-          if (jsonMatches[0].includes('JSON.parse')) {
-            // Handle escaped JSON string inside JSON.parse()
-            const jsonString = jsonMatches[1].replace(/\\"/g, '"').replace(/\\n/g, '');
-            jsonData = JSON.parse(jsonString);
-          } else {
-            // Direct JSON object
-            jsonData = JSON.parse(jsonMatches[1]);
-          }
-          console.log('Found embedded JSON data');
-        } catch (e) {
-          console.log('Error parsing embedded JSON:', e.message);
-        }
-      }
-    });
-    
-    // Check if we found any embedded data with movies
-    if (jsonData && (jsonData.movies || jsonData.items || jsonData.data)) {
-      console.log('Processing embedded JSON data for movies');
-      const moviesData = jsonData.movies || jsonData.items || jsonData.data || [];
-      
-      const trendingMovies = moviesData.slice(0, 10).map(movie => ({
-        title: movie.title || movie.name || 'Unknown Movie',
-        link: movie.link || movie.url || movie.path || `/movie/${movie.id || movie.slug || 'unknown'}`,
-        image: movie.image || movie.poster || movie.thumbnail || movie.coverImage || 'https://via.placeholder.com/300x450'
-      }));
-      
-      if (trendingMovies.length > 0) {
-        console.log(`Found ${trendingMovies.length} movies from embedded data`);
-        
-        // Normalize links
-        trendingMovies.forEach(movie => {
-          if (!movie.link.startsWith('http')) {
-            movie.link = movie.link.startsWith('/') 
-              ? BASE_URL + movie.link 
-              : BASE_URL + '/' + movie.link;
-          }
           
-          if (!movie.image.startsWith('http')) {
-            movie.image = movie.image.startsWith('/') 
-              ? BASE_URL + movie.image 
-              : BASE_URL + '/' + movie.image;
+          if (scrapedMovies.length > 0) {
+            console.log(`Successfully scraped ${scrapedMovies.length} movies using selector ${selector}`);
+            break;
           }
-        });
+        }
+      }
+      
+      // Look for embedded JSON data in script tags (modern sites often use this)
+      if (scrapedMovies.length === 0) {
+        console.log('Trying to extract data from embedded JSON...');
+        const scriptTags = $('script').toArray();
         
-        const responseData = {
-          movies: trendingMovies
-        };
+        for (const script of scriptTags) {
+          const content = $(script).html();
+          if (!content) continue;
+          
+          // Look for JSON data patterns
+          try {
+            // Try to find JSON objects that might contain movies data
+            const jsonMatches = content.match(/(\{.*?\}\}|\[.*?\])/g);
+            if (jsonMatches) {
+              for (const jsonStr of jsonMatches) {
+                try {
+                  const data = JSON.parse(jsonStr);
+                  
+                  // Look for arrays that might contain movies
+                  if (Array.isArray(data)) {
+                    if (data.length > 0 && data[0] && (data[0].title || data[0].name)) {
+                      console.log('Found movie array in script tag');
+                      
+                      data.slice(0, 10).forEach(item => {
+                        const title = item.title || item.name || 'Unknown';
+                        const link = item.url || item.link || `${BASE_URL}/movie/${title.toLowerCase().replace(/\s+/g, '-')}`;
+                        const image = item.image || item.poster || item.thumbnail || 'https://via.placeholder.com/300x450/141414/e50914?text=FreekTo';
+                        
+                        if (title !== 'Unknown' && !scrapedMovies.some(m => m.title === title)) {
+                          scrapedMovies.push({ title, link, image });
+                        }
+                      });
+                      
+                      if (scrapedMovies.length > 0) break;
+                    }
+                  } 
+                  // Look for objects that might contain movie lists
+                  else if (data && typeof data === 'object') {
+                    // Common patterns for movie data
+                    const possibleArrays = ['movies', 'items', 'results', 'data', 'trending', 'featured'];
+                    
+                    for (const key of possibleArrays) {
+                      if (data[key] && Array.isArray(data[key]) && data[key].length > 0) {
+                        console.log(`Found ${key} array in script tag JSON`);
+                        
+                        data[key].slice(0, 10).forEach(item => {
+                          if (!item) return;
+                          
+                          const title = item.title || item.name || 'Unknown';
+                          const link = item.url || item.link || `${BASE_URL}/movie/${title.toLowerCase().replace(/\s+/g, '-')}`;
+                          const image = item.image || item.poster || item.thumbnail || 'https://via.placeholder.com/300x450/141414/e50914?text=FreekTo';
+                          
+                          if (title !== 'Unknown' && !scrapedMovies.some(m => m.title === title)) {
+                            scrapedMovies.push({ title, link, image });
+                          }
+                        });
+                        
+                        if (scrapedMovies.length > 0) break;
+                      }
+                    }
+                    
+                    if (scrapedMovies.length > 0) break;
+                  }
+                } catch (e) {
+                  // Ignore JSON parsing errors
+                }
+              }
+            }
+          } catch (e) {
+            console.log('Error parsing script content:', e.message);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Advanced direct scraping failed:', err.message);
+    }
+    
+    // Second attempt: Try the /trending or /popular endpoint directly
+    if (scrapedMovies.length === 0) {
+      try {
+        console.log('Trying direct access to trending/popular endpoint...');
         
-        // Cache the result
-        cache.put('trending', responseData, CACHE_DURATION);
+        // Try common endpoints for trending content
+        const possibleEndpoints = [
+          `${BASE_URL}/trending`, 
+          `${BASE_URL}/popular`,
+          `${BASE_URL}/top`,
+          `${BASE_URL}/movies/trending`,
+          `${BASE_URL}/movies/popular`
+        ];
         
-        return res.json(responseData);
+        // Try each endpoint
+        for (const endpoint of possibleEndpoints) {
+          try {
+            console.log(`Trying endpoint: ${endpoint}`);
+            
+            // Use different user agent for each attempt
+            const newHeaders = getBrowserHeaders('https://www.google.com/search?q=best+movies+to+watch');
+            
+            response = await fetchWithRetry(endpoint, {
+              headers: newHeaders,
+              timeout: 20000
+            }, 3, 1500);
+            
+            html = response;
+            console.log(`Successfully fetched ${endpoint}, HTML length: ${html.length}`);
+            
+            // Parse with cheerio
+            const $ = cheerio.load(html);
+            
+            // Look for movie items with multiple selectors
+            const selectors = [
+              '.movie-item', '.movie-card', '.movie', 'div[data-movie-id]',
+              '.poster-container', '.film-poster', '.content > div'
+            ];
+            
+            // Try each selector
+            for (const selector of selectors) {
+              const elements = $(selector);
+              
+              if (elements.length > 0) {
+                console.log(`Found ${elements.length} elements with selector ${selector} on ${endpoint}`);
+                
+                elements.each((i, el) => {
+                  if (i >= 10) return false;
+                  
+                  const element = $(el);
+                  
+                  const title = element.find('h3').text().trim() || 
+                                element.find('.title').text().trim() || 
+                                element.find('strong').text().trim() || 
+                                element.attr('title') || 
+                                element.find('img').attr('alt') || 
+                                'Unknown';
+                                
+                  let link = element.attr('href') || 
+                             element.find('a').attr('href') || 
+                             element.parent('a').attr('href');
+                             
+                  if (link && !link.startsWith('http')) {
+                    link = `${BASE_URL}${link.startsWith('/') ? '' : '/'}${link}`;
+                  } else if (!link) {
+                    link = `${BASE_URL}/movie/unknown-${i}`;
+                  }
+                  
+                  let image = element.find('img').attr('data-src') || 
+                              element.find('img').attr('src') || 
+                              element.find('.poster').attr('style')?.match(/url\(['"]?(.*?)['"]?\)/)?.[1];
+                              
+                  if (image && !image.startsWith('http')) {
+                    image = `${BASE_URL}${image.startsWith('/') ? '' : '/'}${image}`;
+                  } else if (!image) {
+                    image = 'https://via.placeholder.com/300x450/141414/e50914?text=FreekTo';
+                  }
+                  
+                  if (title !== 'Unknown' && !scrapedMovies.some(m => m.title === title)) {
+                    scrapedMovies.push({ title, link, image });
+                  }
+                });
+                
+                if (scrapedMovies.length > 0) {
+                  console.log(`Successfully scraped ${scrapedMovies.length} movies from ${endpoint}`);
+                  break;
+                }
+              }
+            }
+            
+            if (scrapedMovies.length > 0) break;
+          } catch (error) {
+            console.log(`Failed to fetch ${endpoint}: ${error.message}`);
+          }
+        }
+      } catch (err) {
+        console.error('Trending/popular endpoint approach failed:', err.message);
       }
     }
     
-    // Try various selectors to find movie items
-    const selectors = [
-      '.movies-list .movie-item',
-      '.grid-items .movie',
-      '.movies-grid .movie',
-      '.movie-container',
-      '[class*="movie"]',
-      '[class*="film"]',
-      'article',
-      '.card',
-      '.thumbnail',
-      '.movie-card',
-      '.item'
+    // If we have successfully scraped movies, return them
+    if (scrapedMovies.length > 0) {
+      console.log(`Successfully scraped ${scrapedMovies.length} trending movies`);
+      
+      // Store in cache
+      const dataToCache = { movies: scrapedMovies };
+      cache.put('trending', dataToCache, CACHE_DURATION);
+      
+      return res.json(dataToCache);
+    }
+    
+    // If all scraping approaches failed, fall back to mock data
+    console.warn('All scraping approaches failed, falling back to mock data');
+    
+    // Mock trending movies data
+    const movies = [
+      {
+        title: "The Shawshank Redemption",
+        link: "https://freek.to/movie/the-shawshank-redemption-1994",
+        image: "https://m.media-amazon.com/images/M/MV5BNDE3ODcxYzMtY2YzZC00NmNlLWJiNDMtZDViZWM2MzIxZDYwXkEyXkFqcGdeQXVyNjAwNDUxODI@._V1_.jpg"
+      },
+      {
+        title: "The Godfather",
+        link: "https://freek.to/movie/the-godfather-1972",
+        image: "https://m.media-amazon.com/images/M/MV5BM2MyNjYxNmUtYTAwNi00MTYxLWJmNWYtYzZlODY3ZTk3OTFlXkEyXkFqcGdeQXVyNzkwMjQ5NzM@._V1_.jpg"
+      },
+      {
+        title: "The Dark Knight",
+        link: "https://freek.to/movie/the-dark-knight-2008",
+        image: "https://m.media-amazon.com/images/M/MV5BMTMxNTMwODM0NF5BMl5BanBnXkFtZTcwODAyMTk2Mw@@._V1_.jpg"
+      },
+      {
+        title: "Pulp Fiction",
+        link: "https://freek.to/movie/pulp-fiction-1994",
+        image: "https://m.media-amazon.com/images/M/MV5BNGNhMDIzZTUtNTBlZi00MTRlLWFjM2ItYzViMjE3YzI5MjljXkEyXkFqcGdeQXVyNzkwMjQ5NzM@._V1_.jpg"
+      },
+      {
+        title: "Inception",
+        link: "https://freek.to/movie/inception-2010",
+        image: "https://m.media-amazon.com/images/M/MV5BMjAxMzY3NjcxNF5BMl5BanBnXkFtZTcwNTI5OTM0Mw@@._V1_.jpg"
+      }
     ];
     
-    let trendingMovies = [];
+    const mockData = { movies };
     
-    for (const selector of selectors) {
-      console.log(`Trying selector: ${selector}`);
-      const elements = $(selector);
-      
-      if (elements.length > 0) {
-        console.log(`Found ${elements.length} elements with selector ${selector}`);
-        
-        elements.each((i, element) => {
-          if (trendingMovies.length >= 10) return; // Limit to 10 movies
-          
-          const $el = $(element);
-          
-          // Try different approaches to extract movie information
-          let title = $el.find('h3').text() || 
-                    $el.find('h2').text() || 
-                    $el.find('.title').text() || 
-                    $el.find('[class*="title"]').text() || 
-                    $el.attr('title') || 
-                    $el.attr('alt') || 
-                    'Unknown Movie';
-          
-          let link = $el.find('a').attr('href') || 
-                   $el.attr('href') || 
-                   $el.parent().attr('href') || 
-                   '';
-                   
-          let image = $el.find('img').attr('src') || 
-                    $el.find('img').attr('data-src') || 
-                    $el.find('[class*="poster"]').attr('src') || 
-                    $el.css('background-image')?.replace(/url\(['"]?(.*?)['"]?\)/i, '$1') || 
-                    '';
-          
-          // Clean up data
-          title = title.trim();
-          
-          // Only add if we have at least a title
-          if (title && title !== 'Unknown Movie') {
-            // Make sure links are absolute
-            if (link && !link.startsWith('http')) {
-              link = link.startsWith('/') ? BASE_URL + link : BASE_URL + '/' + link;
-            }
-            
-            // Make sure images are absolute
-            if (image && !image.startsWith('http')) {
-              image = image.startsWith('/') ? BASE_URL + image : BASE_URL + '/' + image;
-            }
-            
-            trendingMovies.push({
-              title,
-              link,
-              image: image || 'https://via.placeholder.com/300x450'
-            });
-          }
-        });
-        
-        if (trendingMovies.length > 0) {
-          console.log(`Successfully extracted ${trendingMovies.length} movies with selector ${selector}`);
-          break;
-        }
-      }
-    }
-    
-    // If no movies found with primary selectors, try an alternative approach
-    if (trendingMovies.length === 0) {
-      console.log('No movies found with primary selectors, trying alternative approach');
-      
-      // Try to find any movie-like elements
-      $('a').each((i, element) => {
-        if (trendingMovies.length >= 10) return; // Limit to 10 movies
-        
-        const $el = $(element);
-        const href = $el.attr('href') || '';
-        
-        // Check if this link looks like it might be a movie
-        if (href.includes('movie') || href.includes('film') || href.includes('watch')) {
-          const title = $el.text() || 
-                     $el.find('img').attr('alt') || 
-                     href.split('/').pop().replace(/-/g, ' ').replace(/\d+$/, '') || 
-                     'Unknown Movie';
-                     
-          const image = $el.find('img').attr('src') || 
-                     $el.find('img').attr('data-src') || 
-                     '';
-                     
-          // Only add if the title seems reasonable
-          if (title && title.length > 3 && title !== 'Unknown Movie') {
-            const link = href.startsWith('/') ? BASE_URL + href : href.startsWith('http') ? href : BASE_URL + '/' + href;
-            
-            let imageUrl = image;
-            if (image && !image.startsWith('http')) {
-              imageUrl = image.startsWith('/') ? BASE_URL + image : BASE_URL + '/' + image;
-            }
-            
-            trendingMovies.push({
-              title: title.trim(),
-              link,
-              image: imageUrl || 'https://via.placeholder.com/300x450'
-            });
-          }
-        }
-      });
-      
-      console.log(`Alternative approach found ${trendingMovies.length} potential movies`);
-    }
-    
-    // If still no movies found, resort to hardcoded mock data as the final fallback
-    if (trendingMovies.length === 0) {
-      console.log('Scraping failed, falling back to mock data');
-      
-      // Mock data for testing
-      trendingMovies = [
-        {
-          title: "Inception",
-          link: "https://freek.to/movie/inception-2010",
-          image: "https://m.media-amazon.com/images/M/MV5BMjAxMzY3NjcxNF5BMl5BanBnXkFtZTcwNTI5OTM0Mw@@._V1_.jpg"
-        },
-        {
-          title: "The Dark Knight",
-          link: "https://freek.to/movie/the-dark-knight-2008",
-          image: "https://m.media-amazon.com/images/M/MV5BMTMxNTMwODM0NF5BMl5BanBnXkFtZTcwODAyMTk2Mw@@._V1_.jpg"
-        },
-        {
-          title: "Pulp Fiction",
-          link: "https://freek.to/movie/pulp-fiction-1994",
-          image: "https://m.media-amazon.com/images/M/MV5BNGNhMDIzZTUtNTBlZi00MTRlLWFjM2ItYzViMjE3YzI5MjljXkEyXkFqcGdeQXVyNzkwMjQ5NzM@._V1_.jpg"
-        },
-        {
-          title: "The Godfather",
-          link: "https://freek.to/movie/the-godfather-1972",
-          image: "https://m.media-amazon.com/images/M/MV5BM2MyNjYxNmUtYTAwNi00MTYxLWJmNWYtYzZlODY3ZTk3OTFlXkEyXkFqcGdeQXVyNzkwMjQ5NzM@._V1_.jpg"
-        },
-        {
-          title: "Fight Club",
-          link: "https://freek.to/movie/fight-club-1999",
-          image: "https://m.media-amazon.com/images/M/MV5BMmEzNTkxYjQtZTc0MC00YTVjLTg5ZTEtZWMwOWVlYzY0NWIwXkEyXkFqcGdeQXVyNzkwMjQ5NzM@._V1_.jpg"
-        }
-      ];
-    }
-    
-    // Prepare the response
-    const responseData = {
-      movies: trendingMovies
-    };
-    
-    // Cache the result
-    cache.put('trending', responseData, CACHE_DURATION);
-    
-    // Return the data
-    res.json(responseData);
-  } catch (error) {
-    console.error('Error fetching trending movies:', error.message);
-    if (error.response) {
-      console.error('Response status:', error.response.status);
-      console.error('Response headers:', error.response.headers);
-    }
-    
-    // On error, return mock data
-    const mockData = {
-      movies: [
-        {
-          title: "Inception",
-          link: "https://freek.to/movie/inception-2010",
-          image: "https://m.media-amazon.com/images/M/MV5BMjAxMzY3NjcxNF5BMl5BanBnXkFtZTcwNTI5OTM0Mw@@._V1_.jpg"
-        },
-        {
-          title: "The Dark Knight",
-          link: "https://freek.to/movie/the-dark-knight-2008",
-          image: "https://m.media-amazon.com/images/M/MV5BMTMxNTMwODM0NF5BMl5BanBnXkFtZTcwODAyMTk2Mw@@._V1_.jpg"
-        },
-        {
-          title: "Pulp Fiction",
-          link: "https://freek.to/movie/pulp-fiction-1994",
-          image: "https://m.media-amazon.com/images/M/MV5BNGNhMDIzZTUtNTBlZi00MTRlLWFjM2ItYzViMjE3YzI5MjljXkEyXkFqcGdeQXVyNzkwMjQ5NzM@._V1_.jpg"
-        },
-        {
-          title: "The Godfather",
-          link: "https://freek.to/movie/the-godfather-1972",
-          image: "https://m.media-amazon.com/images/M/MV5BM2MyNjYxNmUtYTAwNi00MTYxLWJmNWYtYzZlODY3ZTk3OTFlXkEyXkFqcGdeQXVyNzkwMjQ5NzM@._V1_.jpg"
-        },
-        {
-          title: "Fight Club",
-          link: "https://freek.to/movie/fight-club-1999",
-          image: "https://m.media-amazon.com/images/M/MV5BMmEzNTkxYjQtZTc0MC00YTVjLTg5ZTEtZWMwOWVlYzY0NWIwXkEyXkFqcGdeQXVyNzkwMjQ5NzM@._V1_.jpg"
-        }
-      ]
-    };
-    
-    // Cache the mock data
+    // Cache the mock data too
     cache.put('trending', mockData, CACHE_DURATION);
     
     res.json(mockData);
+  } catch (error) {
+    console.error('Error in trending endpoint:', error);
+    
+    // Return a friendly error
+    res.status(500).json({
+      error: 'Failed to fetch trending movies',
+      message: error.message
+    });
   }
 });
 
@@ -971,6 +968,119 @@ app.get('/search', async (req, res) => {
 
     res.json({ results: mockResults });
   }
+});
+
+// Add a proxy endpoint to forward requests to freek.to
+app.get('/proxy/*', async (req, res) => {
+  try {
+    const originalUrl = req.originalUrl.replace('/proxy/', '');
+    const targetUrl = `${BASE_URL}/${originalUrl}`;
+    
+    console.log(`Proxying request to: ${targetUrl}`);
+    
+    // Enhanced headers to better mimic a real browser
+    const headers = getBrowserHeaders(BASE_URL);
+    
+    // Make the proxied request
+    const response = await fetchWithRetry(targetUrl, {
+      headers: headers,
+      timeout: 30000
+    }, 3, 1000);
+    
+    // Return the proxied response
+    res.send(response);
+  } catch (error) {
+    console.error('Error in proxy endpoint:', error);
+    res.status(500).json({
+      error: 'Failed to proxy request',
+      message: error.message
+    });
+  }
+});
+
+// Video embed endpoint to handle direct embedding
+app.get('/embed/:id', (req, res) => {
+  const videoId = req.params.id;
+  
+  // Send a simple HTML page that will load the video from our /video/:id endpoint
+  res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>FreekTo TV Player</title>
+      <style>
+        body, html {
+          margin: 0;
+          padding: 0;
+          width: 100%;
+          height: 100%;
+          background-color: #000;
+          overflow: hidden;
+        }
+        #video-container {
+          width: 100%;
+          height: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        video {
+          max-width: 100%;
+          max-height: 100%;
+          width: 100%;
+          height: 100%;
+        }
+        .loading {
+          color: white;
+          font-family: Arial, sans-serif;
+          text-align: center;
+        }
+        .error {
+          color: red;
+          font-family: Arial, sans-serif;
+          text-align: center;
+          padding: 20px;
+        }
+      </style>
+    </head>
+    <body>
+      <div id="video-container">
+        <div class="loading">Loading video...</div>
+      </div>
+      
+      <script>
+        document.addEventListener('DOMContentLoaded', async () => {
+          const videoContainer = document.getElementById('video-container');
+          const videoId = '${videoId}';
+          
+          try {
+            // Fetch the video URL from our API
+            const response = await fetch('/video/' + videoId);
+            const data = await response.json();
+            
+            if (data.videoUrl) {
+              // Create video element
+              const video = document.createElement('video');
+              video.controls = true;
+              video.autoplay = true;
+              video.src = data.videoUrl;
+              
+              // Replace loading with video
+              videoContainer.innerHTML = '';
+              videoContainer.appendChild(video);
+            } else {
+              videoContainer.innerHTML = '<div class="error">Video not available</div>';
+            }
+          } catch (error) {
+            videoContainer.innerHTML = '<div class="error">Error loading video: ' + error.message + '</div>';
+          }
+        });
+      </script>
+    </body>
+    </html>
+  `);
 });
 
 // Start the server
