@@ -3,9 +3,13 @@ const cors = require('cors');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const cache = require('memory-cache');
+const path = require('path');
 
 const app = express();
 app.use(cors());
+
+// Serve static files from the public directory
+app.use(express.static(path.join(__dirname, 'public')));
 
 const PORT = process.env.PORT || 3000;
 const CACHE_DURATION = 60 * 60 * 1000; // 1 hour in milliseconds

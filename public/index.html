@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FreekTo TV</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <script src="/js/navigation.js" defer></script>
+    <script src="/js/app.js" defer></script>
+</head>
+<body>
+    <div class="tv-container">
+        <header>
+            <div class="logo">FreekTo TV</div>
+            <nav>
+                <ul id="main-nav">
+                    <li class="nav-item selected" data-section="trending">Trending</li>
+                    <li class="nav-item" data-section="movies">Movies</li>
+                    <li class="nav-item" data-section="series">Series</li>
+                    <li class="nav-item" data-section="search">Search</li>
+                </ul>
+            </nav>
+        </header>
+        
+        <main>
+            <section id="trending" class="content-section active">
+                <h2>Trending Now</h2>
+                <div class="movies-grid" id="trending-movies">
+                    <!-- Movies will be loaded here -->
+                    <div class="loading">Loading trending content...</div>
+                </div>
+            </section>
+            
+            <section id="movies" class="content-section">
+                <h2>Movies</h2>
+                <div class="movies-grid" id="movies-grid">
+                    <!-- Movies will be loaded here -->
+                    <div class="loading">Loading movies...</div>
+                </div>
+            </section>
+            
+            <section id="series" class="content-section">
+                <h2>TV Series</h2>
+                <div class="movies-grid" id="series-grid">
+                    <!-- Series will be loaded here -->
+                    <div class="loading">Loading series...</div>
+                </div>
+            </section>
+            
+            <section id="search" class="content-section">
+                <h2>Search</h2>
+                <div class="search-container">
+                    <input type="text" id="search-input" placeholder="Search movies and series..." autocomplete="off">
+                    <button id="search-button">Search</button>
+                </div>
+                <div class="movies-grid" id="search-results">
+                    <!-- Search results will be loaded here -->
+                </div>
+            </section>
+        </main>
+        
+        <div id="video-player" class="hidden">
+            <div class="player-controls">
+                <button id="close-player">Back to Browse</button>
+                <h3 id="video-title">Movie Title</h3>
+            </div>
+            <video id="main-video" controls></video>
+        </div>
+        
+        <div id="movie-details" class="hidden">
+            <div class="details-backdrop"></div>
+            <div class="details-content">
+                <button id="close-details">Back</button>
+                <div class="details-info">
+                    <h2 id="detail-title">Movie Title</h2>
+                    <div class="detail-meta">
+                        <span id="detail-year">2023</span>
+                        <span id="detail-duration">120 min</span>
+                        <span id="detail-rating">8.5</span>
+                    </div>
+                    <p id="detail-plot">Movie description will appear here.</p>
+                    <div class="details-buttons">
+                        <button id="play-button" class="primary-button">Play</button>
+                        <button id="trailer-button">Trailer</button>
+                    </div>
+                </div>
+                <div class="details-poster">
+                    <img id="detail-poster" src="/images/placeholder.jpg" alt="Movie poster">
+                </div>
+            </div>
+        </div>
+        
+        <div id="remote-guide" class="tv-guide">
+            <div class="guide-item">
+                <span class="key">↑↓←→</span>
+                <span class="action">Navigate</span>
+            </div>
+            <div class="guide-item">
+                <span class="key">OK/Enter</span>
+                <span class="action">Select</span>
+            </div>
+            <div class="guide-item">
+                <span class="key">Back</span>
+                <span class="action">Return</span>
+            </div>
+        </div>
+        
+        <footer>
+            <div class="footer-content">
+                <p>FreekTo TV Web - Optimized for TV Viewing</p>
+            </div>
+        </footer>
+    </div>
+    
+    <!-- Movie item template -->
+    <template id="movie-template">
+        <div class="movie-item" tabindex="0">
+            <div class="movie-poster">
+                <img src="" alt="">
+            </div>
+            <div class="movie-info">
+                <h3 class="movie-title"></h3>
+            </div>
+        </div>
+    </template>
+</body>
+</html>

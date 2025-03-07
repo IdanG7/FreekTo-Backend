@@ -1,0 +1,377 @@
+/* TV-friendly styles optimized for remote navigation */
+:root {
+    --primary-color: #e50914;
+    --secondary-color: #221f1f;
+    --background-color: #141414;
+    --text-color: #fff;
+    --focus-outline: 3px solid #e50914;
+    --item-background: rgba(30, 30, 30, 0.8);
+    --item-focus-background: rgba(60, 60, 60, 0.9);
+    --transition-speed: 0.2s;
+    --spacing: 20px;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: 'Arial', sans-serif;
+    background-color: var(--background-color);
+    color: var(--text-color);
+    line-height: 1.6;
+    overflow-x: hidden;
+    padding: 0;
+    margin: 0;
+}
+
+.tv-container {
+    width: 100%;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Header & Navigation */
+header {
+    padding: var(--spacing);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: rgba(0, 0, 0, 0.8);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+
+.logo {
+    font-size: 2em;
+    font-weight: bold;
+    color: var(--primary-color);
+}
+
+nav ul {
+    display: flex;
+    list-style: none;
+    gap: 30px;
+}
+
+.nav-item {
+    font-size: 1.2em;
+    padding: 10px 20px;
+    cursor: pointer;
+    border-radius: 5px;
+    transition: all var(--transition-speed) ease;
+}
+
+.nav-item:focus, .nav-item.selected {
+    background-color: var(--primary-color);
+    outline: none;
+}
+
+/* Main content area */
+main {
+    flex: 1;
+    padding: var(--spacing);
+    transition: all var(--transition-speed) ease;
+}
+
+.content-section {
+    display: none;
+    animation: fadeIn 0.5s ease;
+}
+
+.content-section.active {
+    display: block;
+}
+
+h2 {
+    margin-bottom: 20px;
+    font-size: 1.8em;
+}
+
+/* Movie grid */
+.movies-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 20px;
+    margin-top: 20px;
+}
+
+.movie-item {
+    background-color: var(--item-background);
+    border-radius: 10px;
+    overflow: hidden;
+    transition: transform var(--transition-speed) ease, box-shadow var(--transition-speed) ease;
+    cursor: pointer;
+    position: relative;
+}
+
+.movie-item:focus, .movie-item:hover {
+    transform: scale(1.05);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+    outline: var(--focus-outline);
+    z-index: 10;
+}
+
+.movie-poster {
+    width: 100%;
+    aspect-ratio: 2/3;
+    overflow: hidden;
+}
+
+.movie-poster img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.3s ease;
+}
+
+.movie-item:focus .movie-poster img, .movie-item:hover .movie-poster img {
+    transform: scale(1.1);
+}
+
+.movie-info {
+    padding: 15px;
+}
+
+.movie-title {
+    font-size: 1.1em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Loading indicator */
+.loading {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: 40px;
+    font-size: 1.2em;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+/* Video player */
+#video-player {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background-color: black;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+}
+
+#video-player.hidden {
+    display: none;
+}
+
+.player-controls {
+    padding: 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: rgba(0, 0, 0, 0.8);
+}
+
+#main-video {
+    flex: 1;
+    width: 100%;
+    object-fit: contain;
+}
+
+/* Movie details */
+#movie-details {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 900;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+#movie-details.hidden {
+    display: none;
+}
+
+.details-backdrop {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(5px);
+}
+
+.details-content {
+    position: relative;
+    width: 90%;
+    max-width: 1200px;
+    background-color: var(--secondary-color);
+    border-radius: 10px;
+    padding: 30px;
+    display: flex;
+    gap: 30px;
+    max-height: 80vh;
+    overflow: hidden;
+}
+
+.details-info {
+    flex: 2;
+}
+
+.details-poster {
+    flex: 1;
+    max-width: 300px;
+}
+
+#detail-poster {
+    width: 100%;
+    height: auto;
+    border-radius: 10px;
+}
+
+.detail-meta {
+    display: flex;
+    gap: 20px;
+    margin: 10px 0 20px;
+    font-size: 1.1em;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.details-buttons {
+    margin-top: 30px;
+    display: flex;
+    gap: 15px;
+}
+
+.primary-button {
+    background-color: var(--primary-color);
+    color: white;
+    border: none;
+    padding: 12px 30px;
+    font-size: 1.2em;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+button {
+    background-color: rgba(255, 255, 255, 0.2);
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    font-size: 1.1em;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+button:focus, button:hover {
+    background-color: var(--primary-color);
+    outline: none;
+}
+
+#close-details, #close-player {
+    background-color: transparent;
+    border: 1px solid white;
+}
+
+/* Search */
+.search-container {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 30px;
+}
+
+#search-input {
+    flex: 1;
+    padding: 15px;
+    background-color: var(--item-background);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    color: white;
+    font-size: 1.2em;
+    border-radius: 5px;
+}
+
+#search-button {
+    padding: 15px 30px;
+}
+
+#search-input:focus {
+    outline: var(--focus-outline);
+}
+
+/* Remote control guide */
+.tv-guide {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background-color: rgba(0, 0, 0, 0.7);
+    padding: 15px;
+    border-radius: 10px;
+    display: flex;
+    gap: 15px;
+    z-index: 100;
+}
+
+.guide-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.key {
+    background-color: rgba(255, 255, 255, 0.2);
+    padding: 5px 10px;
+    border-radius: 5px;
+    font-size: 0.9em;
+}
+
+.action {
+    font-size: 0.9em;
+    opacity: 0.8;
+}
+
+/* Footer */
+footer {
+    padding: var(--spacing);
+    background-color: rgba(0, 0, 0, 0.8);
+    text-align: center;
+    font-size: 0.9em;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Media Queries for TVs */
+@media (min-width: 1920px) {
+    :root {
+        --spacing: 40px;
+    }
+    
+    body {
+        font-size: 120%;
+    }
+    
+    .movies-grid {
+        grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+        gap: 30px;
+    }
+}
+
+/* Remote-friendly focus indicators */
+:focus {
+    outline: var(--focus-outline);
+}
