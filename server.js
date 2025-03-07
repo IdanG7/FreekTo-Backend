@@ -25,62 +25,190 @@ app.get('/', (req, res) => {
   });
 });
 
-// Trending movies endpoint
+// Trending movies endpoint with improved anti-bot bypass techniques
 app.get('/trending', async (req, res) => {
   try {
     // Check if we have cached data
     const cachedData = cache.get('trending');
     if (cachedData) {
       console.log('Returning cached trending data');
-      return res.json({ movies: cachedData });
+      return res.json(cachedData);
     }
     
     console.log('Fetching trending movies from', BASE_URL);
     
-    // Define headers to make the request look like it's coming from a browser
+    // Enhanced headers to better mimic a real browser
     const headers = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
       'Accept-Language': 'en-US,en;q=0.9',
       'Accept-Encoding': 'gzip, deflate, br',
-      'Connection': 'keep-alive',
-      'Upgrade-Insecure-Requests': '1',
+      'Referer': 'https://www.google.com/',
+      'sec-ch-ua': '"Google Chrome";v="123", "Not:A-Brand";v="8", "Chromium";v="123"',
+      'sec-ch-ua-mobile': '?0',
+      'sec-ch-ua-platform': '"macOS"',
       'Sec-Fetch-Dest': 'document',
       'Sec-Fetch-Mode': 'navigate',
-      'Sec-Fetch-Site': 'none',
+      'Sec-Fetch-Site': 'cross-site',
       'Sec-Fetch-User': '?1',
-      'Cache-Control': 'max-age=0'
+      'Upgrade-Insecure-Requests': '1',
+      'Connection': 'keep-alive',
+      'Cache-Control': 'max-age=0',
+      'dnt': '1',
+      'Pragma': 'no-cache'
     };
     
-    // Fetch the HTML of the homepage
-    const response = await axios.get(BASE_URL, {
-      headers: headers,
-      timeout: 15000, // 15 second timeout
-      responseType: 'document'
-    });
+    // Try multiple approaches to get the content
+    let html;
+    let response;
     
-    const html = response.data;
-    console.log('Successfully fetched homepage HTML, length:', html.length);
+    // Approach 1: Direct access with enhanced headers
+    try {
+      console.log('Trying direct access with enhanced headers...');
+      response = await axios.get(BASE_URL, {
+        headers: headers,
+        timeout: 15000
+      });
+      html = response.data;
+      console.log(`Successfully fetched homepage HTML, length: ${html.length}`);
+    } catch (directError) {
+      console.log('Direct access failed:', directError.message);
+      
+      // Approach 2: Try alternative URL
+      try {
+        console.log('Trying alternative URL (movies page)...');
+        response = await axios.get(`${BASE_URL}/movies`, {
+          headers: headers,
+          timeout: 15000
+        });
+        html = response.data;
+        console.log(`Successfully fetched movies page HTML, length: ${html.length}`);
+      } catch (altError) {
+        console.log('Alternative URL failed:', altError.message);
+        
+        // Approach 3: Try with additional delay and retry
+        try {
+          console.log('Trying with delay and different user agent...');
+          // Modify headers slightly
+          headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36';
+          
+          // Add a delay before request
+          await new Promise(resolve => setTimeout(resolve, 1500));
+          
+          response = await axios.get(BASE_URL, {
+            headers: headers,
+            timeout: 20000
+          });
+          html = response.data;
+          console.log(`Successfully fetched homepage with delay, HTML length: ${html.length}`);
+        } catch (delayError) {
+          console.log('Delayed approach failed:', delayError.message);
+          throw new Error('All direct access approaches failed');
+        }
+      }
+    }
     
-    // Log first 500 characters of HTML to see what we're dealing with
+    // Log first 500 characters to debug
     console.log('HTML preview:', html.substring(0, 500));
     
     const $ = cheerio.load(html);
-    
-    const trendingMovies = [];
-    
-    // Log the structure to understand the DOM
     console.log('Analyzing page structure...');
     
-    // Extract trending movies from the homepage
-    // Try multiple selectors to find movie items
+    // Extract any script URLs that might load the actual content
+    const scriptUrls = [];
+    $('script[src]').each((i, el) => {
+      const src = $(el).attr('src');
+      if (src) {
+        scriptUrls.push(src.startsWith('http') ? src : (src.startsWith('/') ? BASE_URL + src : BASE_URL + '/' + src));
+      }
+    });
+    
+    console.log(`Found ${scriptUrls.length} script URLs`);
+    
+    // Check for any data in JSON format embedded in the page
+    let jsonData = null;
+    $('script:not([src])').each((i, el) => {
+      const scriptContent = $(el).html() || '';
+      // Look for patterns like window.__INITIAL_DATA__ = {...} or JSON data
+      const jsonMatches = scriptContent.match(/window\.__[A-Z_]+__\s*=\s*({.+?});/s) || 
+                          scriptContent.match(/const\s+initialData\s*=\s*({.+?});/s) ||
+                          scriptContent.match(/var\s+initialData\s*=\s*({.+?});/s) ||
+                          scriptContent.match(/JSON\.parse\(['"](.+?)['"]\)/s);
+      
+      if (jsonMatches && jsonMatches.length > 1) {
+        try {
+          // If it's JSON.parse, we need to handle the string differently
+          if (jsonMatches[0].includes('JSON.parse')) {
+            // Handle escaped JSON string inside JSON.parse()
+            const jsonString = jsonMatches[1].replace(/\\"/g, '"').replace(/\\n/g, '');
+            jsonData = JSON.parse(jsonString);
+          } else {
+            // Direct JSON object
+            jsonData = JSON.parse(jsonMatches[1]);
+          }
+          console.log('Found embedded JSON data');
+        } catch (e) {
+          console.log('Error parsing embedded JSON:', e.message);
+        }
+      }
+    });
+    
+    // Check if we found any embedded data with movies
+    if (jsonData && (jsonData.movies || jsonData.items || jsonData.data)) {
+      console.log('Processing embedded JSON data for movies');
+      const moviesData = jsonData.movies || jsonData.items || jsonData.data || [];
+      
+      const trendingMovies = moviesData.slice(0, 10).map(movie => ({
+        title: movie.title || movie.name || 'Unknown Movie',
+        link: movie.link || movie.url || movie.path || `/movie/${movie.id || movie.slug || 'unknown'}`,
+        image: movie.image || movie.poster || movie.thumbnail || movie.coverImage || 'https://via.placeholder.com/300x450'
+      }));
+      
+      if (trendingMovies.length > 0) {
+        console.log(`Found ${trendingMovies.length} movies from embedded data`);
+        
+        // Normalize links
+        trendingMovies.forEach(movie => {
+          if (!movie.link.startsWith('http')) {
+            movie.link = movie.link.startsWith('/') 
+              ? BASE_URL + movie.link 
+              : BASE_URL + '/' + movie.link;
+          }
+          
+          if (!movie.image.startsWith('http')) {
+            movie.image = movie.image.startsWith('/') 
+              ? BASE_URL + movie.image 
+              : BASE_URL + '/' + movie.image;
+          }
+        });
+        
+        const responseData = {
+          movies: trendingMovies
+        };
+        
+        // Cache the result
+        cache.put('trending', responseData, CACHE_DURATION);
+        
+        return res.json(responseData);
+      }
+    }
+    
+    // Try various selectors to find movie items
     const selectors = [
-      '.movies-list .movie-item', '.grid-items .movie', '.movies-grid .movie', 
-      '.movie-container', '[class*="movie"]', '[class*="film"]',
-      'article', '.card', '.thumbnail', '.movie-card', '.item'
+      '.movies-list .movie-item',
+      '.grid-items .movie',
+      '.movies-grid .movie',
+      '.movie-container',
+      '[class*="movie"]',
+      '[class*="film"]',
+      'article',
+      '.card',
+      '.thumbnail',
+      '.movie-card',
+      '.item'
     ];
     
-    let foundElements = false;
+    let trendingMovies = [];
     
     for (const selector of selectors) {
       console.log(`Trying selector: ${selector}`);
@@ -88,204 +216,149 @@ app.get('/trending', async (req, res) => {
       
       if (elements.length > 0) {
         console.log(`Found ${elements.length} elements with selector ${selector}`);
-        foundElements = true;
         
         elements.each((i, element) => {
+          if (trendingMovies.length >= 10) return; // Limit to 10 movies
+          
           const $el = $(element);
           
-          // Try different selectors for title
-          const titleSelectors = ['.title', 'h3', 'h2', '.name', '[class*="title"]', 'a[title]', '.movie-title', 'a'];
-          let title = null;
+          // Try different approaches to extract movie information
+          let title = $el.find('h3').text() || 
+                    $el.find('h2').text() || 
+                    $el.find('.title').text() || 
+                    $el.find('[class*="title"]').text() || 
+                    $el.attr('title') || 
+                    $el.attr('alt') || 
+                    'Unknown Movie';
           
-          for (const titleSelector of titleSelectors) {
-            const titleEl = $el.find(titleSelector).first();
-            if (titleEl.length > 0) {
-              title = titleEl.attr('title') || titleEl.text().trim();
-              if (title) break;
-            }
-          }
+          let link = $el.find('a').attr('href') || 
+                   $el.attr('href') || 
+                   $el.parent().attr('href') || 
+                   '';
+                   
+          let image = $el.find('img').attr('src') || 
+                    $el.find('img').attr('data-src') || 
+                    $el.find('[class*="poster"]').attr('src') || 
+                    $el.css('background-image')?.replace(/url\(['"]?(.*?)['"]?\)/i, '$1') || 
+                    '';
           
-          // If no title found, try the element's own title attribute or text
-          if (!title) {
-            title = $el.attr('title') || $el.text().trim();
-          }
+          // Clean up data
+          title = title.trim();
           
-          // Try different selectors for link
-          let link = null;
-          const linkEl = $el.find('a').first();
-          if (linkEl.length > 0) {
-            link = linkEl.attr('href');
-          } else if ($el.is('a')) {
-            link = $el.attr('href');
-          }
-          
-          // Ensure link has full URL
-          if (link && !link.startsWith('http')) {
-            link = BASE_URL + (link.startsWith('/') ? link : '/' + link);
-          }
-          
-          // Try different selectors for image
-          let image = null;
-          const imgSelectors = ['img', '.poster', '.thumbnail', '.cover', '[class*="poster"]', '[class*="image"]', '.img'];
-          
-          for (const imgSelector of imgSelectors) {
-            const imgEl = $el.find(imgSelector).first();
-            if (imgEl.length > 0) {
-              image = imgEl.attr('src') || imgEl.attr('data-src') || imgEl.attr('data-original');
-              
-              if (!image) {
-                const style = imgEl.attr('style');
-                if (style && style.includes('url(')) {
-                  const match = style.match(/url\(['"]?([^'"]+)['"]?\)/);
-                  if (match && match[1]) {
-                    image = match[1];
-                  }
-                }
-              }
-              
-              if (image) break;
-            }
-          }
-          
-          // If still no image, check for background image in style
-          if (!image) {
-            const style = $el.attr('style');
-            if (style && style.includes('url(')) {
-              const match = style.match(/url\(['"]?([^'"]+)['"]?\)/);
-              if (match && match[1]) {
-                image = match[1];
-              }
-            }
-          }
-          
-          // Ensure image has full URL
-          if (image && !image.startsWith('http')) {
-            image = BASE_URL + (image.startsWith('/') ? image : '/' + image);
-          }
-          
-          // Only add items that have all required data
-          if (title && link) {
-            // If no image found, use a placeholder
-            if (!image) {
-              image = 'https://via.placeholder.com/300x450?text=No+Image';
+          // Only add if we have at least a title
+          if (title && title !== 'Unknown Movie') {
+            // Make sure links are absolute
+            if (link && !link.startsWith('http')) {
+              link = link.startsWith('/') ? BASE_URL + link : BASE_URL + '/' + link;
             }
             
-            // Limit title length to avoid unnecessarily long titles
-            if (title.length > 100) {
-              title = title.substring(0, 97) + '...';
+            // Make sure images are absolute
+            if (image && !image.startsWith('http')) {
+              image = image.startsWith('/') ? BASE_URL + image : BASE_URL + '/' + image;
             }
-            
-            // Clean the title (remove excessive whitespace)
-            title = title.replace(/\s+/g, ' ').trim();
             
             trendingMovies.push({
               title,
               link,
-              image
+              image: image || 'https://via.placeholder.com/300x450'
             });
-            
-            console.log(`Found movie: ${title}`);
           }
         });
         
-        // If we found enough movies, break out of the selector loop
-        if (trendingMovies.length >= 5) {
+        if (trendingMovies.length > 0) {
+          console.log(`Successfully extracted ${trendingMovies.length} movies with selector ${selector}`);
           break;
         }
       }
     }
     
-    // If no movies were found with specific selectors, try a more generic approach
+    // If no movies found with primary selectors, try an alternative approach
     if (trendingMovies.length === 0) {
       console.log('No movies found with primary selectors, trying alternative approach');
       
       // Try to find any movie-like elements
       $('a').each((i, element) => {
-        const $el = $(element);
-        const href = $el.attr('href');
+        if (trendingMovies.length >= 10) return; // Limit to 10 movies
         
-        // Check if this link might be a movie
-        if (href && (href.includes('/movie/') || href.includes('/watch/') || href.includes('/film/'))) {
-          const title = $el.text().trim() || $el.attr('title') || 'Unknown Title';
-          let link = href;
-          if (!link.startsWith('http')) {
-            link = BASE_URL + (link.startsWith('/') ? link : '/' + link);
+        const $el = $(element);
+        const href = $el.attr('href') || '';
+        
+        // Check if this link looks like it might be a movie
+        if (href.includes('movie') || href.includes('film') || href.includes('watch')) {
+          const title = $el.text() || 
+                     $el.find('img').attr('alt') || 
+                     href.split('/').pop().replace(/-/g, ' ').replace(/\d+$/, '') || 
+                     'Unknown Movie';
+                     
+          const image = $el.find('img').attr('src') || 
+                     $el.find('img').attr('data-src') || 
+                     '';
+                     
+          // Only add if the title seems reasonable
+          if (title && title.length > 3 && title !== 'Unknown Movie') {
+            const link = href.startsWith('/') ? BASE_URL + href : href.startsWith('http') ? href : BASE_URL + '/' + href;
+            
+            let imageUrl = image;
+            if (image && !image.startsWith('http')) {
+              imageUrl = image.startsWith('/') ? BASE_URL + image : BASE_URL + '/' + image;
+            }
+            
+            trendingMovies.push({
+              title: title.trim(),
+              link,
+              image: imageUrl || 'https://via.placeholder.com/300x450'
+            });
           }
-          
-          // Look for an image near this link
-          let image = $el.find('img').attr('src') || 
-                     $el.parent().find('img').attr('src') ||
-                     $el.prev().find('img').attr('src');
-          
-          // If no image found, use a placeholder
-          if (!image) {
-            image = 'https://via.placeholder.com/300x450?text=No+Image';
-          } else if (!image.startsWith('http')) {
-            image = BASE_URL + (image.startsWith('/') ? image : '/' + image);
-          }
-          
-          trendingMovies.push({
-            title,
-            link,
-            image
-          });
-          
-          console.log(`Found movie with alternative method: ${title}`);
         }
       });
+      
+      console.log(`Alternative approach found ${trendingMovies.length} potential movies`);
     }
     
-    // If still no movies found, fall back to mock data
+    // If still no movies found, resort to hardcoded mock data as the final fallback
     if (trendingMovies.length === 0) {
       console.log('Scraping failed, falling back to mock data');
-      const mockMovies = [
+      
+      // Mock data for testing
+      trendingMovies = [
         {
           title: "Inception",
-          link: `${BASE_URL}/movie/inception-2010`,
+          link: "https://freek.to/movie/inception-2010",
           image: "https://m.media-amazon.com/images/M/MV5BMjAxMzY3NjcxNF5BMl5BanBnXkFtZTcwNTI5OTM0Mw@@._V1_.jpg"
         },
         {
           title: "The Dark Knight",
-          link: `${BASE_URL}/movie/the-dark-knight-2008`,
+          link: "https://freek.to/movie/the-dark-knight-2008",
           image: "https://m.media-amazon.com/images/M/MV5BMTMxNTMwODM0NF5BMl5BanBnXkFtZTcwODAyMTk2Mw@@._V1_.jpg"
         },
         {
           title: "Pulp Fiction",
-          link: `${BASE_URL}/movie/pulp-fiction-1994`,
+          link: "https://freek.to/movie/pulp-fiction-1994",
           image: "https://m.media-amazon.com/images/M/MV5BNGNhMDIzZTUtNTBlZi00MTRlLWFjM2ItYzViMjE3YzI5MjljXkEyXkFqcGdeQXVyNzkwMjQ5NzM@._V1_.jpg"
         },
         {
           title: "The Godfather",
-          link: `${BASE_URL}/movie/the-godfather-1972`,
+          link: "https://freek.to/movie/the-godfather-1972",
           image: "https://m.media-amazon.com/images/M/MV5BM2MyNjYxNmUtYTAwNi00MTYxLWJmNWYtYzZlODY3ZTk3OTFlXkEyXkFqcGdeQXVyNzkwMjQ5NzM@._V1_.jpg"
         },
         {
           title: "Fight Club",
-          link: `${BASE_URL}/movie/fight-club-1999`,
+          link: "https://freek.to/movie/fight-club-1999",
           image: "https://m.media-amazon.com/images/M/MV5BMmEzNTkxYjQtZTc0MC00YTVjLTg5ZTEtZWMwOWVlYzY0NWIwXkEyXkFqcGdeQXVyNzkwMjQ5NzM@._V1_.jpg"
         }
       ];
-      
-      // Cache the mock data
-      cache.put('trending', mockMovies, CACHE_DURATION);
-      
-      return res.json({ movies: mockMovies });
     }
     
-    // Limit to 20 movies
-    const limitedMovies = trendingMovies.slice(0, 20);
+    // Prepare the response
+    const responseData = {
+      movies: trendingMovies
+    };
     
-    console.log(`Successfully scraped ${limitedMovies.length} movies`);
+    // Cache the result
+    cache.put('trending', responseData, CACHE_DURATION);
     
-    // Log details of first movie for debugging
-    if (limitedMovies.length > 0) {
-      console.log('First movie details:', JSON.stringify(limitedMovies[0], null, 2));
-    }
-    
-    // Cache the results
-    cache.put('trending', limitedMovies, CACHE_DURATION);
-    
-    res.json({ movies: limitedMovies });
+    // Return the data
+    res.json(responseData);
   } catch (error) {
     console.error('Error fetching trending movies:', error.message);
     if (error.response) {
@@ -293,39 +366,41 @@ app.get('/trending', async (req, res) => {
       console.error('Response headers:', error.response.headers);
     }
     
-    // Fall back to mock data on error
-    const mockMovies = [
-      {
-        title: "Inception",
-        link: `${BASE_URL}/movie/inception-2010`,
-        image: "https://m.media-amazon.com/images/M/MV5BMjAxMzY3NjcxNF5BMl5BanBnXkFtZTcwNTI5OTM0Mw@@._V1_.jpg"
-      },
-      {
-        title: "The Dark Knight",
-        link: `${BASE_URL}/movie/the-dark-knight-2008`,
-        image: "https://m.media-amazon.com/images/M/MV5BMTMxNTMwODM0NF5BMl5BanBnXkFtZTcwODAyMTk2Mw@@._V1_.jpg"
-      },
-      {
-        title: "Pulp Fiction",
-        link: `${BASE_URL}/movie/pulp-fiction-1994`,
-        image: "https://m.media-amazon.com/images/M/MV5BNGNhMDIzZTUtNTBlZi00MTRlLWFjM2ItYzViMjE3YzI5MjljXkEyXkFqcGdeQXVyNzkwMjQ5NzM@._V1_.jpg"
-      },
-      {
-        title: "The Godfather",
-        link: `${BASE_URL}/movie/the-godfather-1972`,
-        image: "https://m.media-amazon.com/images/M/MV5BM2MyNjYxNmUtYTAwNi00MTYxLWJmNWYtYzZlODY3ZTk3OTFlXkEyXkFqcGdeQXVyNzkwMjQ5NzM@._V1_.jpg"
-      },
-      {
-        title: "Fight Club",
-        link: `${BASE_URL}/movie/fight-club-1999`,
-        image: "https://m.media-amazon.com/images/M/MV5BMmEzNTkxYjQtZTc0MC00YTVjLTg5ZTEtZWMwOWVlYzY0NWIwXkEyXkFqcGdeQXVyNzkwMjQ5NzM@._V1_.jpg"
-      }
-    ];
+    // On error, return mock data
+    const mockData = {
+      movies: [
+        {
+          title: "Inception",
+          link: "https://freek.to/movie/inception-2010",
+          image: "https://m.media-amazon.com/images/M/MV5BMjAxMzY3NjcxNF5BMl5BanBnXkFtZTcwNTI5OTM0Mw@@._V1_.jpg"
+        },
+        {
+          title: "The Dark Knight",
+          link: "https://freek.to/movie/the-dark-knight-2008",
+          image: "https://m.media-amazon.com/images/M/MV5BMTMxNTMwODM0NF5BMl5BanBnXkFtZTcwODAyMTk2Mw@@._V1_.jpg"
+        },
+        {
+          title: "Pulp Fiction",
+          link: "https://freek.to/movie/pulp-fiction-1994",
+          image: "https://m.media-amazon.com/images/M/MV5BNGNhMDIzZTUtNTBlZi00MTRlLWFjM2ItYzViMjE3YzI5MjljXkEyXkFqcGdeQXVyNzkwMjQ5NzM@._V1_.jpg"
+        },
+        {
+          title: "The Godfather",
+          link: "https://freek.to/movie/the-godfather-1972",
+          image: "https://m.media-amazon.com/images/M/MV5BM2MyNjYxNmUtYTAwNi00MTYxLWJmNWYtYzZlODY3ZTk3OTFlXkEyXkFqcGdeQXVyNzkwMjQ5NzM@._V1_.jpg"
+        },
+        {
+          title: "Fight Club",
+          link: "https://freek.to/movie/fight-club-1999",
+          image: "https://m.media-amazon.com/images/M/MV5BMmEzNTkxYjQtZTc0MC00YTVjLTg5ZTEtZWMwOWVlYzY0NWIwXkEyXkFqcGdeQXVyNzkwMjQ5NzM@._V1_.jpg"
+        }
+      ]
+    };
     
     // Cache the mock data
-    cache.put('trending', mockMovies, CACHE_DURATION);
+    cache.put('trending', mockData, CACHE_DURATION);
     
-    res.json({ movies: mockMovies });
+    res.json(mockData);
   }
 });
 
